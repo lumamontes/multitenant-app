@@ -3,6 +3,20 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
+    "config:generate": "tsx scripts/generateConfigs.ts",
+    "build:all": "tsx scripts/buildAll.ts",
+    "build:validate": "tsx scripts/validateTenants.ts",
+    "tenant:add": "tsx scripts/addTenant.ts",
+    "tenant:list": "tsx scripts/listTenants.ts",
+    "tenant:info": "tsx scripts/getTenantInfo.ts",
+    "tenant:validate": "tsx scripts/validateTenants.ts",
+    "dev:tenant1": "TENANT=tenant1 expo start",
+    "dev:tenant2": "TENANT=tenant2 expo start",
+    "build:all:parallel": "tsx scripts/buildAllParallel.ts",
+    "build:all:dry": "tsx scripts/buildAll.ts all production --dry-run",
+    "build:ios": "tsx scripts/buildAll.ts ios production",
+    "build:android": "tsx scripts/buildAll.ts android production",
+    "build:preview": "tsx scripts/buildAll.ts all preview",
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
@@ -40,10 +54,14 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/js-yaml": "^4.0.9",
     "@types/react": "~19.0.10",
-    "typescript": "~5.8.3",
     "eslint": "^9.25.0",
-    "eslint-config-expo": "~9.2.0"
+    "eslint-config-expo": "~9.2.0",
+    "inquirer": "^12.6.3",
+    "js-yaml": "^4.1.0",
+    "tsx": "^4.19.4",
+    "typescript": "~5.8.3"
   },
   "private": true
 }

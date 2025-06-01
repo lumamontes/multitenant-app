@@ -1,0 +1,467 @@
+# .github/workflows/multitenant-build-deploy.yml
+name: Multitenant Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tenant:
+        description: 'Specific tenant to build (leave empty for all)'
+        required: false
+        type: string
+      channel:
+        description: 'Deployment channel'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+          - testflight
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      runtimeVersion:
+        description: 'Runtime version (in x.x.x format) for OTA updates'
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Validate version format if provided
+  validate:
+    name: 🧐 Validate Input
+    runs-on: ubuntu-latest
+    if: ${{ inputs.runtimeVersion }}
+    steps:
+      - name: Validate runtime version format
+        run: |
+          if [[ ! "${{ inputs.runtimeVersion }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Runtime version must be in x.x.x format"
+            exit 1
+          fi
+
+  # Discover tenants and setup build matrix
+  discover:
+    name: 🔍 Discover Tenants
+    runs-on: ubuntu-latest
+    outputs:
+      tenants: ${{ steps.get-tenants.outputs.tenants }}
+      should-deploy: ${{ steps.check-deploy.outputs.deploy }}
+      channel: ${{ steps.set-channel.outputs.channel }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ⬇️ Fetch commits from base branch
+        if: ${{ github.ref != 'refs/heads/main' }}
+        run: git fetch origin main:main --depth 100
+
+      - name: 🔧 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔍 Get tenant list
+        id: get-tenants
+        run: |
+          if [ "${{ inputs.tenant }}" != "" ]; then
+            echo "tenants=[\"${{ inputs.tenant }}\"]" >> $GITHUB_OUTPUT
+          else
+            TENANTS=$(ls config/tenants/*.json | xargs -I {} basename {} .json | jq -R . | jq -s .)
+            echo "tenants=$TENANTS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🚀 Check deployment conditions
+        id: check-deploy
+        run: |
+          if [[ $GITHUB_EVENT_NAME == "release" ]] || [[ "${{ inputs.channel }}" == "production" ]]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📝 Set channel
+        id: set-channel
+        run: |
+          if [[ $GITHUB_EVENT_NAME == "pull_request" ]]; then
+            echo "channel=preview" >> $GITHUB_OUTPUT
+          elif [[ $GITHUB_EVENT_NAME == "release" ]]; then
+            echo "channel=production" >> $GITHUB_OUTPUT
+          else
+            echo "channel=${{ inputs.channel || 'preview' }}" >> $GITHUB_OUTPUT
+          fi
+
+  # Check fingerprint to decide between OTA update or new build
+  fingerprint:
+    name: 📷 Check Fingerprint
+    runs-on: ubuntu-latest
+    needs: [discover]
+    strategy:
+      matrix:
+        tenant: ${{ fromJson(needs.discover.outputs.tenants) }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🔧 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 📷 Check fingerprint for ${{ matrix.tenant }}
+        id: fingerprint
+        run: |
+          # Generate config for this tenant
+          npm run config:generate
+          
+          # Check if native code changed using expo fingerprint
+          if npx @expo/fingerprint@latest --platform all --json > current-fingerprint.json; then
+            # Compare with previous fingerprint (stored in cache or from previous commits)
+            if [ -f "previous-fingerprint-${{ matrix.tenant }}.json" ]; then
+              if ! cmp -s current-fingerprint.json previous-fingerprint-${{ matrix.tenant }}.json; then
+                echo "needs-build=true" >> $GITHUB_OUTPUT
+              else
+                echo "needs-build=false" >> $GITHUB_OUTPUT
+              fi
+            else
+              echo "needs-build=true" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "needs-build=true" >> $GITHUB_OUTPUT
+          fi
+        env:
+          TENANT: ${{ matrix.tenant }}
+
+      - name: 📝 Save fingerprint result
+        run: |
+          mkdir -p fingerprint-results
+          echo "${{ steps.fingerprint.outputs.needs-build }}" > fingerprint-results/${{ matrix.tenant }}-needs-build.txt
+
+      - name: 📤 Upload fingerprint results
+        uses: actions/upload-artifact@v4
+        with:
+          name: fingerprint-${{ matrix.tenant }}
+          path: fingerprint-results/
+          retention-days: 1
+
+  # OTA Update job (if no native changes)
+  ota-update:
+    name: 📦 OTA Update - ${{ matrix.tenant }}
+    runs-on: ubuntu-latest
+    needs: [discover, fingerprint]
+    strategy:
+      matrix:
+        tenant: ${{ fromJson(needs.discover.outputs.tenants) }}
+    steps:
+      - name: ⬇️ Download fingerprint results
+        uses: actions/download-artifact@v4
+        with:
+          name: fingerprint-${{ matrix.tenant }}
+          path: fingerprint-results/
+
+      - name: 🔍 Check if OTA update needed
+        id: check-ota
+        run: |
+          NEEDS_BUILD=$(cat fingerprint-results/${{ matrix.tenant }}-needs-build.txt)
+          if [ "$NEEDS_BUILD" = "false" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ⬇️ Checkout
+        if: steps.check-ota.outputs.should-run == 'true'
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node
+        if: steps.check-ota.outputs.should-run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 📦 Install dependencies
+        if: steps.check-ota.outputs.should-run == 'true'
+        run: npm ci
+
+      - name: 🔤 Compile translations
+        if: steps.check-ota.outputs.should-run == 'true'
+        run: npm run intl:build
+
+      - name: ✏️ Write environment variables
+        if: steps.check-ota.outputs.should-run == 'true'
+        run: |
+          echo "${{ secrets.ENV_TOKEN }}" > .env
+          echo "EXPO_PUBLIC_BUNDLE_IDENTIFIER=$(git rev-parse --short HEAD)" >> .env
+          echo "EXPO_PUBLIC_BUNDLE_DATE=$(date -u +"%y%m%d%H")" >> .env
+
+      - name: 📱 Generate tenant config
+        if: steps.check-ota.outputs.should-run == 'true'
+        run: npm run config:generate
+        env:
+          TENANT: ${{ matrix.tenant }}
+
+      - name: 🚀 Deploy OTA Update
+        if: steps.check-ota.outputs.should-run == 'true'
+        run: |
+          eas update \
+            --channel ${{ needs.discover.outputs.channel }} \
+            --message "OTA update for ${{ matrix.tenant }} - ${{ github.event.head_commit.message || github.event.release.name }}" \
+            --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          TENANT: ${{ matrix.tenant }}
+
+  # Native Build job (if native changes detected or forced)
+  build-ios:
+    name: 🍎 Build iOS - ${{ matrix.tenant }}
+    runs-on: macos-15
+    needs: [discover, fingerprint]
+    strategy:
+      matrix:
+        tenant: ${{ fromJson(needs.discover.outputs.tenants) }}
+        include:
+          - tenant: tenant1
+            profile: tenant1
+          - tenant: tenantTwo  
+            profile: tenantTwo
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.tenant }}-ios-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: ⬇️ Download fingerprint results
+        uses: actions/download-artifact@v4
+        with:
+          name: fingerprint-${{ matrix.tenant }}
+          path: fingerprint-results/
+
+      - name: 🔍 Check if build needed
+        id: check-build
+        run: |
+          NEEDS_BUILD=$(cat fingerprint-results/${{ matrix.tenant }}-needs-build.txt)
+          if [ "$NEEDS_BUILD" = "true" ] || [ "${{ needs.discover.outputs.channel }}" = "production" ] || [ "${{ needs.discover.outputs.channel }}" = "testflight" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ⬇️ Checkout
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 🍎 Setup Xcode
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: ♻️ Restore CocoaPods cache
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('**/Podfile.lock') }}
+
+      - name: 📦 Install dependencies
+        if: steps.check-build.outputs.should-run == 'true'
+        run: npm ci
+
+      - name: 🔤 Compile translations
+        if: steps.check-build.outputs.should-run == 'true'
+        run: npm run intl:build
+
+      - name: ✏️ Write environment variables
+        if: steps.check-build.outputs.should-run == 'true'
+        run: |
+          echo "${{ secrets.ENV_TOKEN }}" > .env
+          echo "EXPO_PUBLIC_BUNDLE_IDENTIFIER=$(git rev-parse --short HEAD)" >> .env
+          echo "EXPO_PUBLIC_BUNDLE_DATE=$(date -u +"%y%m%d%H")" >> .env
+          echo "${{ secrets.GOOGLE_SERVICES_TOKEN }}" > google-services.json
+
+      - name: 📱 Generate tenant config
+        if: steps.check-build.outputs.should-run == 'true'
+        run: npm run config:generate
+        env:
+          TENANT: ${{ matrix.tenant }}
+
+      - name: 🏗️ EAS Build
+        if: steps.check-build.outputs.should-run == 'true'
+        run: |
+          PROFILE="${{ matrix.profile }}-${{ needs.discover.outputs.channel }}"
+          npm run use-build-number-with-bump eas build \
+            --platform ios \
+            --profile $PROFILE \
+            --local \
+            --output build.ipa \
+            --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          TENANT: ${{ matrix.tenant }}
+
+      - name: 📤 Upload IPA artifact
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tenant }}-ios-${{ needs.discover.outputs.channel }}
+          path: build.ipa
+          retention-days: 30
+
+      - name: 🚀 Submit to TestFlight
+        if: steps.check-build.outputs.should-run == 'true' && contains(fromJson('["production", "testflight"]'), needs.discover.outputs.channel)
+        run: eas submit --platform ios --non-interactive --path build.ipa
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+  build-android:
+    name: 🤖 Build Android - ${{ matrix.tenant }}
+    runs-on: ubuntu-latest
+    needs: [discover, fingerprint]
+    strategy:
+      matrix:
+        tenant: ${{ fromJson(needs.discover.outputs.tenants) }}
+        include:
+          - tenant: tenant1
+            profile: tenant1
+          - tenant: tenantTwo
+            profile: tenantTwo
+    concurrency:
+      group: ${{ github.workflow }}-${{ matrix.tenant }}-android-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: ⬇️ Download fingerprint results
+        uses: actions/download-artifact@v4
+        with:
+          name: fingerprint-${{ matrix.tenant }}
+          path: fingerprint-results/
+
+      - name: 🔍 Check if build needed
+        id: check-build
+        run: |
+          NEEDS_BUILD=$(cat fingerprint-results/${{ matrix.tenant }}-needs-build.txt)
+          if [ "$NEEDS_BUILD" = "true" ] || [ "${{ needs.discover.outputs.channel }}" = "production" ] || [ "${{ needs.discover.outputs.channel }}" = "testflight" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should-run=true" >> $GITHUB_OUTPUT
+          else
+            echo "should-run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: ⬇️ Checkout
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: ☕ Setup Java
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 📦 Install dependencies
+        if: steps.check-build.outputs.should-run == 'true'
+        run: npm ci
+
+      - name: 🔤 Compile translations
+        if: steps.check-build.outputs.should-run == 'true'
+        run: npm run intl:build
+
+      - name: ✏️ Write environment variables
+        if: steps.check-build.outputs.should-run == 'true'
+        run: |
+          echo "${{ secrets.ENV_TOKEN }}" > .env
+          echo "EXPO_PUBLIC_BUNDLE_IDENTIFIER=$(git rev-parse --short HEAD)" >> .env
+          echo "EXPO_PUBLIC_BUNDLE_DATE=$(date -u +"%y%m%d%H")" >> .env
+          echo "${{ secrets.GOOGLE_SERVICES_TOKEN }}" > google-services.json
+
+      - name: 📱 Generate tenant config
+        run: npm run config:generate
+        if: steps.check-build.outputs.should-run == 'true'
+        env:
+          TENANT: ${{ matrix.tenant }}
+
+      - name: 🏗️ EAS Build
+        if: steps.check-build.outputs.should-run == 'true'
+        run: |
+          PROFILE="${{ matrix.profile }}-${{ needs.discover.outputs.channel }}-android"
+          npm run use-build-number-with-bump eas build \
+            --platform android \
+            --profile $PROFILE \
+            --local \
+            --output build.apk \
+            --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          TENANT: ${{ matrix.tenant }}
+
+      - name: 📤 Upload APK artifact
+        if: steps.check-build.outputs.should-run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tenant }}-android-${{ needs.discover.outputs.channel }}
+          path: build.apk
+          retention-days: 30
+
+      - name: 🚀 Submit to Play Store
+        if: steps.check-build.outputs.should-run == 'true' && contains(fromJson('["production"]'), needs.discover.outputs.channel)
+        run: eas submit --platform android --non-interactive --path build.apk
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+  # Notification job
+  notify:
+    name: 📢 Notify Results
+    runs-on: ubuntu-latest
+    needs: [discover, build-ios, build-android, ota-update]
+    if: always()
+    steps:
+      - name: 📱 Send Slack notification
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: |
+            Multitenant build completed for channel: ${{ needs.discover.outputs.channel }}
+            Tenants: ${{ join(fromJson(needs.discover.outputs.tenants), ', ') }}
+            iOS Build: ${{ needs.build-ios.result }}
+            Android Build: ${{ needs.build-android.result }}
+            OTA Updates: ${{ needs.ota-update.result }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -1,0 +1,28 @@
+{
+  "generated": "2025-06-01T08:19:05.518Z",
+  "totalTenants": 2,
+  "tenants": {
+    "tenant1": {
+      "name": "Tenant One App",
+      "bundleIdentifier": "com.yourcompany.tenantone",
+      "package": "com.yourcompany.tenantone",
+      "features": [
+        "basic"
+      ],
+      "apiUrl": "https://tenant1-api.yourapp.com",
+      "primaryColor": "#FF0000",
+      "configFile": "./config/tenants/tenant1.json"
+    },
+    "tenant2": {
+      "name": "Tenant Two App",
+      "bundleIdentifier": "com.yourcompany.tenantTwo",
+      "package": "com.yourcompany.tenantTwo",
+      "features": [
+        "basic"
+      ],
+      "apiUrl": "https://tenant1-api.yourapp.com",
+      "primaryColor": "#FF0000",
+      "configFile": "./config/tenants/tenant2.json"
+    }
+  }
+}

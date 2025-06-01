@@ -1,0 +1,30 @@
+{
+  "name": "Tenant Two App",
+  "slug": "tenant-Two-app",
+  "bundleIdentifier": "com.yourcompany.tenantTwo",
+  "package": "com.yourcompany.tenantTwo",
+  "theme": {
+    "primaryColor": "#FF0000",
+    "backgroundColor": "#FFFFFF",
+    "secondaryColor": "#FF000066",
+    "textColor": "#000000"
+  },
+  "api": {
+    "baseUrl": "https://tenant1-api.yourapp.com"
+  },
+  "features": ["basic"],
+  "assets": {
+    "icon": "./assets/images/tenant2/icon.png",
+    "splash": "./assets/tenant2/splash.png",
+    "logo": "./assets/tenant2/logo.png"
+  },
+  "branding": {
+    "appName": "TenantTwo",
+    "companyName": "Tenant Two Inc.",
+    "supportEmail": "support@tenant1.com",
+    "website": "https://tenant1.com"
+  },
+  "extra": {
+    "tenant": "tenant2"
+  }
+}

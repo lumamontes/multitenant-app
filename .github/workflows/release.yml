@@ -1,0 +1,78 @@
+# .github/workflows/release.yml
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🏗 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 🏗 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 📋 Get tenant list
+        id: tenants
+        run: |
+          TENANTS=$(node -e "
+            const fs = require('fs');
+            const tenantsDir = './config/tenants';
+            if (fs.existsSync(tenantsDir)) {
+              const files = fs.readdirSync(tenantsDir)
+                .filter(file => file.endsWith('.json'))
+                .map(file => file.replace('.json', ''));
+              console.log(files.join(', '));
+            }
+          ")
+          echo "list=$TENANTS" >> $GITHUB_OUTPUT
+
+      - name: 📝 Generate release notes
+        id: release-notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          cat > release-notes.md << EOF
+          # Release $VERSION
+          
+          ## 📱 Available Tenants
+          ${{ steps.tenants.outputs.list }}
+          
+          ## 🚀 Build Commands
+          \`\`\`bash
+          # Build all tenants
+          npm run build:all
+          
+          # Build specific tenant
+          eas build --profile <tenant>-production --platform <ios|android>
+          \`\`\`
+          
+          ## 📋 Tenant Configurations
+          $(ls -1 ./config/tenants/*.json | wc -l) tenant configurations available
+          
+          ## 🔧 Generated at
+          $(date)
+          EOF
+
+      - name: 🎉 Create Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Release ${{ github.ref }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false

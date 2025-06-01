@@ -1,0 +1,127 @@
+{
+  "cli": {
+    "version": ">= 3.0.0"
+  },
+  "build": {
+    "tenant1-production": {
+      "env": {
+        "TENANT": "tenant1",
+        "APP_VERSION": "1.0.0"
+      },
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantone",
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantone",
+        "buildType": "apk"
+      }
+    },
+    "tenant1-preview": {
+      "extends": "tenant1-production",
+      "distribution": "internal",
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantone",
+        "buildConfiguration": "Debug"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantone",
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    },
+    "tenant1-development": {
+      "extends": "tenant1-production",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantone.dev",
+        "buildConfiguration": "Debug"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantone.dev",
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    },
+    "tenant2-production": {
+      "env": {
+        "TENANT": "tenant2",
+        "APP_VERSION": "1.0.0"
+      },
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantTwo",
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantTwo",
+        "buildType": "apk"
+      }
+    },
+    "tenant2-preview": {
+      "extends": "tenant2-production",
+      "distribution": "internal",
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantTwo",
+        "buildConfiguration": "Debug"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantTwo",
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    },
+    "tenant2-development": {
+      "extends": "tenant2-production",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantTwo.dev",
+        "buildConfiguration": "Debug"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantTwo.dev",
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    }
+  },
+  "submit": {
+    "tenant1-production": {
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantone"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantone",
+        "track": "production"
+      }
+    },
+    "tenant1-internal": {
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantone"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantone",
+        "track": "internal"
+      }
+    },
+    "tenant2-production": {
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantTwo"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantTwo",
+        "track": "production"
+      }
+    },
+    "tenant2-internal": {
+      "ios": {
+        "bundleIdentifier": "com.yourcompany.tenantTwo"
+      },
+      "android": {
+        "package": "com.yourcompany.tenantTwo",
+        "track": "internal"
+      }
+    }
+  }
+}
