@@ -88,8 +88,12 @@ jobs:
           if [ "${{ inputs.tenant }}" != "" ]; then
             echo "tenants=[\"${{ inputs.tenant }}\"]" >> $GITHUB_OUTPUT
           else
-            TENANTS=$(ls config/tenants/*.json | xargs -I {} basename {} .json | jq -R . | jq -s .)
-            echo "tenants=$TENANTS" >> $GITHUB_OUTPUT
+            if [ -d "config/tenants" ] && [ "$(ls -A config/tenants/*.json 2>/dev/null)" ]; then
+              TENANTS=$(ls config/tenants/*.json | xargs -I {} basename {} .json | jq -R . | jq -s . | tr -d '\n')
+              echo "tenants=$TENANTS" >> $GITHUB_OUTPUT
+            else
+              echo "tenants=[]" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: 🚀 Check deployment conditions
