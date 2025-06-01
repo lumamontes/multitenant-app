@@ -1,4 +1,5 @@
 // scripts/addTenant.ts
+import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
@@ -111,12 +112,30 @@ const createTenant = async () => {
       console.log(`📁 Created assets directory: ${tenantAssetsDir}`);
     }
     
+    // Regenerate all workflows
+    console.log('🔄 Regenerating workflows...');
+    execSync('npm run config:generate', { stdio: 'inherit' });
+    
     // Update main tenants index (optional - for easier discovery)
     updateTenantsIndex();
     
     console.log(`🎉 Tenant ${id} created successfully!`);
     console.log(`📝 Edit the config at: ${tenantPath}`);
     console.log(`🖼️  Add assets to: ${tenantAssetsDir}`);
+
+    console.log(`\n🔐 Required secrets to add in GitHub:`);
+    const secretsPrefix = id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    console.log(`   ${secretsPrefix}_ENV_TOKEN`);
+    console.log(`   ${secretsPrefix}_GOOGLE_SERVICES_TOKEN`);
+    console.log(`   ${secretsPrefix}_SLACK_WEBHOOK_URL (optional)`);
+    console.log(`   ${secretsPrefix}_SENTRY_AUTH_TOKEN (optional)`);
+
+    console.log(`\n🚀 Next steps:`);
+    console.log(`1. Add ${tenantAssetsDir}/icon.png (1024x1024)`);
+    console.log(`2. Add ${tenantAssetsDir}/splash.png`);
+    console.log(`3. Add ${tenantAssetsDir}/logo.png`);
+    console.log(`4. Add the required secrets in GitHub repository settings`);
+    console.log(`5. Test with: gh workflow run build-${id}-app.yml`);
     
   } catch (error) {
     console.error('Error adding tenant:', (error as Error).message);

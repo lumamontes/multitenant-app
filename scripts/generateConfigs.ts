@@ -4,44 +4,46 @@ import * as path from 'path';
 import { generateAppConfig } from './generateAppConfig';
 import { generateEasConfig } from './generateEasConfig';
 
+interface TenantConfig {
+  name: string;
+  slug: string;
+  bundleIdentifier: string;
+  package: string;
+  theme: {
+    primaryColor: string;
+    backgroundColor: string;
+    secondaryColor: string;
+    textColor: string;
+  };
+  api: {
+    baseUrl: string;
+  };
+  features: string[];
+  assets: {
+    icon: string;
+    splash: string;
+    logo: string;
+  };
+  branding: {
+    appName: string;
+    companyName: string;
+    supportEmail: string;
+    website: string;
+  };
+}
+
 const main = () => {
   try {
     console.log('🔧 Generating configurations...\n');
 
     // Generate app.config.ts if tenant is specified
-    const tenantId = process.env.TENANT; // Updated from TENANT
+    const tenantId = process.env.EXPO_PUBLIC_TENANT;
     if (tenantId) {
       console.log(`📱 Generating app config for tenant: ${tenantId}`);
-      
-      // Verify tenant exists
-      const tenantPath = path.join('./config/tenants', `${tenantId}.json`);
-      if (!fs.existsSync(tenantPath)) {
-        const tenantsDir = './config/tenants';
-        const availableTenants = fs.existsSync(tenantsDir) 
-          ? fs.readdirSync(tenantsDir)
-              .filter(file => file.endsWith('.json'))
-              .map(file => file.replace('.json', ''))
-          : [];
-        
-        throw new Error(
-          `Tenant ${tenantId} not found. Available tenants: ${availableTenants.join(', ')}`
-        );
-      }
-
       const appConfig = generateAppConfig(tenantId);
-      const configContent = `// Auto-generated app.config.ts for tenant: ${tenantId}
-// Generated at: ${new Date().toISOString()}
-import { ExpoConfig } from 'expo/config';
-
-const config: { expo: ExpoConfig } = ${JSON.stringify(appConfig, null, 2)};
-
-export default config;
-`;
+      const configContent = generateAppConfigContent(tenantId, appConfig);
       fs.writeFileSync('./app.config.ts', configContent);
       console.log(`✅ Generated app.config.ts for tenant: ${tenantId}`);
-    } else {
-      console.log('ℹ️  No TENANT specified, skipping app.config.ts generation');
-      console.log('   Set TENANT=<tenantId> to generate tenant-specific config');
     }
 
     // Generate eas.json
@@ -50,166 +52,504 @@ export default config;
     fs.writeFileSync('./eas.json', JSON.stringify(easConfig, null, 2));
     console.log('✅ Generated eas.json');
 
-    // Optional: Generate tenant overview
-    console.log('\n📊 Generating tenant overview...');
-    generateTenantOverview();
+    // Generate individual workflow files for each tenant
+    console.log('\n🔄 Generating individual tenant workflows...');
+    generateTenantWorkflows();
+
+    // Generate main workflow that triggers individual workflows
+    console.log('\n🎯 Generating main orchestrator workflow...');
+    generateOrchestratorWorkflow();
 
     console.log('\n🎉 Configuration generation completed!');
     
-    if (tenantId) {
-      console.log(`\n🚀 Quick start:`);
-      console.log(`   TENANT=${tenantId} expo start`);
-      console.log(`   eas build --profile ${tenantId}-production --platform ios`);
-    } else {
-      console.log(`\n💡 To generate tenant-specific config:`);
-      console.log(`   TENANT=<tenantId> npm run config:generate`);
-    }
-
   } catch (error) {
     console.error('❌ Error generating configurations:', (error as Error).message);
     process.exit(1);
   }
 };
 
-// Helper function to generate a tenant overview
-const generateTenantOverview = () => {
-  try {
-    const tenantsDir = './config/tenants';
-    
-    if (!fs.existsSync(tenantsDir)) {
-      console.log('⚠️  No tenants directory found, skipping overview generation');
-      return;
-    }
-
-    const tenantFiles = fs.readdirSync(tenantsDir)
-      .filter(file => file.endsWith('.json'));
-
-    if (tenantFiles.length === 0) {
-      console.log('⚠️  No tenant configurations found');
-      return;
-    }
-
-    const overview = {
-      generated: new Date().toISOString(),
-      totalTenants: tenantFiles.length,
-      tenants: {} as Record<string, any>
-    };
-
-    tenantFiles.forEach(file => {
-      try {
-        const tenantId = file.replace('.json', '');
-        const tenantPath = path.join(tenantsDir, file);
-        const tenant = JSON.parse(fs.readFileSync(tenantPath, 'utf8'));
-        
-        overview.tenants[tenantId] = {
-          name: tenant.name,
-          bundleIdentifier: tenant.bundleIdentifier,
-          package: tenant.package,
-          features: tenant.features,
-          apiUrl: tenant.api?.baseUrl,
-          primaryColor: tenant.theme?.primaryColor,
-          configFile: `./config/tenants/${file}`
-        };
-      } catch (error) {
-        console.warn(`⚠️  Error processing ${file}: ${(error as Error).message}`);
-        overview.tenants[file.replace('.json', '')] = {
-          error: (error as Error).message
-        };
-      }
-    });
-
-    // Save overview
-    fs.writeFileSync('./tenant-overview.json', JSON.stringify(overview, null, 2));
-    console.log(`✅ Generated tenant overview (${tenantFiles.length} tenants)`);
-
-    // Generate markdown documentation
-    generateTenantDocs(overview);
-
-  } catch (error) {
-    console.warn('⚠️  Could not generate tenant overview:', (error as Error).message);
+const generateTenantWorkflows = () => {
+  const tenantsDir = './config/tenants';
+  
+  if (!fs.existsSync(tenantsDir)) {
+    console.log('⚠️ No tenants directory found');
+    return;
   }
+
+  const workflowsDir = '.github/workflows';
+  if (!fs.existsSync(workflowsDir)) {
+    fs.mkdirSync(workflowsDir, { recursive: true });
+  }
+
+  const tenantFiles = fs.readdirSync(tenantsDir)
+    .filter(file => file.endsWith('.json'));
+
+  tenantFiles.forEach(file => {
+    const tenantId = file.replace('.json', '');
+    const tenantPath = path.join(tenantsDir, file);
+    
+    try {
+      const tenant: TenantConfig = JSON.parse(fs.readFileSync(tenantPath, 'utf8'));
+      const workflowContent = generateTenantWorkflow(tenantId, tenant);
+      const workflowPath = path.join(workflowsDir, `build-${tenantId}-app.yml`);
+      
+      fs.writeFileSync(workflowPath, workflowContent);
+      console.log(`✅ Generated workflow: build-${tenantId}-app.yml`);
+      
+    } catch (error) {
+      console.error(`❌ Error generating workflow for ${tenantId}:`, (error as Error).message);
+    }
+  });
 };
 
-// Helper function to generate markdown documentation
-const generateTenantDocs = (overview: any) => {
-  try {
-    const markdown = `# Tenant Configuration Overview
+const generateTenantWorkflow = (tenantId: string, tenant: TenantConfig): string => {
+  const secretsPrefix = tenantId.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+  
+  return `# Auto-generated workflow for ${tenant.name}
+# Generated at: ${new Date().toISOString()}
+# DO NOT EDIT MANUALLY - This file is auto-generated by scripts/generateConfigs.ts
 
-Generated: ${overview.generated}
-Total Tenants: ${overview.totalTenants}
+name: Build ${tenant.branding.appName}
 
-## Available Tenants
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: string
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'production'
+        type: string
+      skip-build:
+        description: 'Skip build and only do OTA update'
+        required: false
+        default: false
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+          - development
+      skip-build:
+        description: 'Skip build and only do OTA update'
+        required: false
+        default: false
+        type: boolean
 
-| Tenant ID | App Name | Bundle ID | Features | Primary Color |
-|-----------|----------|-----------|----------|---------------|
-${Object.entries(overview.tenants).map(([id, config]: [string, any]) => {
-  if (config.error) {
-    return `| ${id} | ❌ Error | - | - | - |`;
-  }
-  return `| ${id} | ${config.name} | ${config.bundleIdentifier} | ${config.features?.join(', ') || 'none'} | ${config.primaryColor || 'N/A'} |`;
-}).join('\n')}
+concurrency:
+  group: \${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
 
-## Quick Commands
+env:
+  TENANT_ID: ${tenantId}
+  TENANT_NAME: "${tenant.name}"
+  BUNDLE_IDENTIFIER: "${tenant.bundleIdentifier}"
+  PACKAGE_NAME: "${tenant.package}"
 
-### Development
-\`\`\`bash
-# Start development server for specific tenant
-TENANT=<tenantId> expo start
+jobs:
+  # Check fingerprint to decide between OTA update or new build
+  fingerprint:
+    name: 📷 Check Fingerprint
+    runs-on: ubuntu-latest
+    outputs:
+      needs-build: \${{ steps.fingerprint.outputs.includes-changes }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-# Examples:
-${Object.keys(overview.tenants).slice(0, 3).map(id => 
-  `TENANT=${id} expo start`
-).join('\n')}
-\`\`\`
+      - name: 🔧 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
 
-### Building
-\`\`\`bash
-# Build specific tenant
-eas build --profile <tenantId>-production --platform <ios|android>
+      - name: 📦 Install dependencies
+        run: npm ci
 
-# Build all tenants
-npm run build:all
+      - name: 📱 Generate tenant config
+        run: npm run config:generate
+        env:
+          EXPO_PUBLIC_TENANT: ${tenantId}
 
-# Examples:
-${Object.keys(overview.tenants).slice(0, 2).map(id => 
-  `eas build --profile ${id}-production --platform ios`
-).join('\n')}
-\`\`\`
+      - name: 📷 Check fingerprint
+        id: fingerprint
+        run: |
+          # Check if native code changed using expo fingerprint
+          if npx @expo/fingerprint@latest --platform all --json > current-fingerprint.json; then
+            # Compare with cached fingerprint
+            if [ -f "fingerprint-cache-${tenantId}.json" ]; then
+              if ! cmp -s current-fingerprint.json fingerprint-cache-${tenantId}.json; then
+                echo "includes-changes=true" >> $GITHUB_OUTPUT
+                echo "🔄 Native changes detected for ${tenantId}"
+              else
+                echo "includes-changes=false" >> $GITHUB_OUTPUT
+                echo "✅ No native changes for ${tenantId}"
+              fi
+            else
+              echo "includes-changes=true" >> $GITHUB_OUTPUT
+              echo "🆕 First build for ${tenantId}"
+            fi
+            cp current-fingerprint.json fingerprint-cache-${tenantId}.json
+          else
+            echo "includes-changes=true" >> $GITHUB_OUTPUT
+          fi
 
-### Management
-\`\`\`bash
-# List all tenants
-npm run tenant:list
+      - name: 💾 Cache fingerprint
+        uses: actions/cache@v4
+        with:
+          path: fingerprint-cache-${tenantId}.json
+          key: fingerprint-${tenantId}-\${{ github.sha }}
+          restore-keys: |
+            fingerprint-${tenantId}-
 
-# Get tenant details
-npm run tenant:info <tenantId>
+  # OTA Update (if no native changes)
+  ota-update:
+    name: 📦 OTA Update
+    runs-on: ubuntu-latest
+    needs: [fingerprint]
+    if: \${{ needs.fingerprint.outputs.needs-build == 'false' && !inputs.skip-build }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
 
-# Validate all tenant configs
-npm run tenant:validate
+      - name: 🔧 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
 
-# Add new tenant
-npm run tenant:add
-\`\`\`
+      - name: 📦 Install dependencies
+        run: npm ci
 
-## Configuration Files
+      - name: 🔤 Compile translations
+        run: npm run intl:build || echo "No translations to compile"
 
-${Object.entries(overview.tenants).map(([id, config]: [string, any]) => {
-  if (config.error) {
-    return `- **${id}**: ❌ ${config.error}`;
-  }
-  return `- **${id}**: \`${config.configFile}\``;
-}).join('\n')}
+      - name: ✏️ Write environment variables
+        run: |
+          echo "\${{ secrets.${secretsPrefix}_ENV_TOKEN }}" > .env
+          echo "EXPO_PUBLIC_BUNDLE_IDENTIFIER=$(git rev-parse --short HEAD)" >> .env
+          echo "EXPO_PUBLIC_BUNDLE_DATE=$(date -u +"%y%m%d%H")" >> .env
 
----
-*This documentation is auto-generated. Run \`npm run config:generate\` to update.*
+      - name: 📱 Generate tenant config
+        run: npm run config:generate
+        env:
+          EXPO_PUBLIC_TENANT: ${tenantId}
+
+      - name: 🚀 Deploy OTA Update
+        run: |
+          eas update \\
+            --channel \${{ inputs.profile || 'production' }} \\
+            --message "OTA update for ${tenant.branding.appName} - \${{ github.event.head_commit.message || 'Manual deployment' }}" \\
+            --non-interactive
+        env:
+          EXPO_TOKEN: \${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_TENANT: ${tenantId}
+
+  # iOS Build
+  build-ios:
+    name: 🍎 Build iOS
+    runs-on: macos-15
+    needs: [fingerprint]
+    if: \${{ always() && (needs.fingerprint.outputs.needs-build == 'true' || inputs.skip-build == false) && contains(fromJson('["all", "ios"]'), inputs.platform) }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: 🍎 Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.4'
+
+      - name: ♻️ Restore CocoaPods cache
+        uses: actions/cache@v4
+        with:
+          path: ios/Pods
+          key: \${{ runner.os }}-pods-\${{ hashFiles('**/Podfile.lock') }}
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔤 Compile translations
+        run: npm run intl:build || echo "No translations to compile"
+
+      - name: ✏️ Write environment variables
+        run: |
+          echo "\${{ secrets.${secretsPrefix}_ENV_TOKEN }}" > .env
+          echo "EXPO_PUBLIC_BUNDLE_IDENTIFIER=$(git rev-parse --short HEAD)" >> .env
+          echo "EXPO_PUBLIC_BUNDLE_DATE=$(date -u +"%y%m%d%H")" >> .env
+          echo "\${{ secrets.${secretsPrefix}_GOOGLE_SERVICES_TOKEN }}" > google-services.json
+
+      - name: 📱 Generate tenant config
+        run: npm run config:generate
+        env:
+          EXPO_PUBLIC_TENANT: ${tenantId}
+
+      - name: 🏗️ EAS Build iOS
+        run: |
+          PROFILE="${tenantId}-\${{ inputs.profile || 'production' }}"
+          npm run use-build-number-with-bump eas build \\
+            --platform ios \\
+            --profile \$PROFILE \\
+            --local \\
+            --output build-${tenantId}-ios.ipa \\
+            --non-interactive
+        env:
+          EXPO_TOKEN: \${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_TENANT: ${tenantId}
+
+      - name: 📤 Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${tenantId}-ios-\${{ inputs.profile || 'production' }}
+          path: build-${tenantId}-ios.ipa
+          retention-days: 30
+
+      - name: 🚀 Submit to App Store
+        if: \${{ contains(fromJson('["production"]'), inputs.profile) }}
+        run: eas submit --platform ios --non-interactive --path build-${tenantId}-ios.ipa
+        env:
+          EXPO_TOKEN: \${{ secrets.EXPO_TOKEN }}
+
+  # Android Build
+  build-android:
+    name: 🤖 Build Android
+    runs-on: ubuntu-latest
+    needs: [fingerprint]
+    if: \${{ always() && (needs.fingerprint.outputs.needs-build == 'true' || inputs.skip-build == false) && contains(fromJson('["all", "android"]'), inputs.platform) }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 📦 Install dependencies
+        run: npm ci
+
+      - name: 🔤 Compile translations
+        run: npm run intl:build || echo "No translations to compile"
+
+      - name: ✏️ Write environment variables
+        run: |
+          echo "\${{ secrets.${secretsPrefix}_ENV_TOKEN }}" > .env
+          echo "EXPO_PUBLIC_BUNDLE_IDENTIFIER=$(git rev-parse --short HEAD)" >> .env
+          echo "EXPO_PUBLIC_BUNDLE_DATE=$(date -u +"%y%m%d%H")" >> .env
+          echo "\${{ secrets.${secretsPrefix}_GOOGLE_SERVICES_TOKEN }}" > google-services.json
+
+      - name: 📱 Generate tenant config
+        run: npm run config:generate
+        env:
+          EXPO_PUBLIC_TENANT: ${tenantId}
+
+      - name: 🏗️ EAS Build Android
+        run: |
+          PROFILE="${tenantId}-\${{ inputs.profile || 'production' }}-android"
+          npm run use-build-number-with-bump eas build \\
+            --platform android \\
+            --profile \$PROFILE \\
+            --local \\
+            --output build-${tenantId}-android.apk \\
+            --non-interactive
+        env:
+          EXPO_TOKEN: \${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_TENANT: ${tenantId}
+
+      - name: 📤 Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${tenantId}-android-\${{ inputs.profile || 'production' }}
+          path: build-${tenantId}-android.apk
+          retention-days: 30
+
+      - name: 🚀 Submit to Play Store
+        if: \${{ contains(fromJson('["production"]'), inputs.profile) }}
+        run: eas submit --platform android --non-interactive --path build-${tenantId}-android.apk
+        env:
+          EXPO_TOKEN: \${{ secrets.EXPO_TOKEN }}
+
+  # Notify completion
+  notify:
+    name: 📢 Notify
+    runs-on: ubuntu-latest
+    needs: [build-ios, build-android, ota-update]
+    if: always()
+    steps:
+      - name: 📱 Send Slack notification
+        if: \${{ secrets.${secretsPrefix}_SLACK_WEBHOOK_URL }}
+        uses: 8398a7/action-slack@v3
+        with:
+          status: \${{ job.status }}
+          text: |
+            ${tenant.branding.appName} build completed!
+            iOS: \${{ needs.build-ios.result }}
+            Android: \${{ needs.build-android.result }}
+            OTA: \${{ needs.ota-update.result }}
+        env:
+          SLACK_WEBHOOK_URL: \${{ secrets.${secretsPrefix}_SLACK_WEBHOOK_URL }}
+`;
+};
+
+const generateOrchestratorWorkflow = () => {
+  const tenantsDir = './config/tenants';
+  const tenantFiles = fs.readdirSync(tenantsDir).filter(file => file.endsWith('.json'));
+  const tenants = tenantFiles.map(file => file.replace('.json', ''));
+
+  const orchestratorContent = `# Auto-generated orchestrator workflow
+# Generated at: ${new Date().toISOString()}
+# This workflow triggers individual tenant builds
+
+name: Build All Tenants
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tenants:
+        description: 'Comma-separated list of tenants (leave empty for all)'
+        required: false
+        type: string
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - preview
+          - development
+
+concurrency:
+  group: \${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  discover:
+    name: 🔍 Discover Tenants
+    runs-on: ubuntu-latest
+    outputs:
+      tenants: \${{ steps.get-tenants.outputs.tenants }}
+      profile: \${{ steps.set-profile.outputs.profile }}
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔍 Get tenant list
+        id: get-tenants
+        run: |
+          if [ "\${{ inputs.tenants }}" != "" ]; then
+            TENANTS_INPUT="\${{ inputs.tenants }}"
+            TENANTS_ARRAY=$(echo \$TENANTS_INPUT | tr ',' '\\n' | jq -R . | jq -s .)
+            echo "tenants=\$TENANTS_ARRAY" >> $GITHUB_OUTPUT
+          else
+            # All available tenants
+            TENANTS='${JSON.stringify(tenants)}'
+            echo "tenants=\$TENANTS" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 📝 Set profile
+        id: set-profile
+        run: |
+          if [[ \$GITHUB_EVENT_NAME == "pull_request" ]]; then
+            echo "profile=preview" >> $GITHUB_OUTPUT
+          elif [[ \$GITHUB_EVENT_NAME == "release" ]]; then
+            echo "profile=production" >> $GITHUB_OUTPUT
+          else
+            echo "profile=\${{ inputs.profile || 'production' }}" >> $GITHUB_OUTPUT
+          fi
+
+${tenants.map(tenantId => `
+  build-${tenantId}:
+    name: 🏗️ Build ${tenantId}
+    needs: [discover]
+    if: \${{ contains(fromJson(needs.discover.outputs.tenants), '${tenantId}') }}
+    uses: ./.github/workflows/build-${tenantId}-app.yml
+    with:
+      platform: \${{ inputs.platform || 'all' }}
+      profile: \${{ needs.discover.outputs.profile }}
+    secrets: inherit`).join('')}
+
+  summary:
+    name: 📊 Build Summary
+    runs-on: ubuntu-latest
+    needs: [discover${tenants.map(t => `, build-${t}`).join('')}]
+    if: always()
+    steps:
+      - name: 📊 Print summary
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Tenants built:** \${{ join(fromJson(needs.discover.outputs.tenants), ', ') }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Profile:** \${{ needs.discover.outputs.profile }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** \${{ inputs.platform || 'all' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Results:" >> $GITHUB_STEP_SUMMARY
+${tenants.map(tenantId => `          echo "- ${tenantId}: \${{ needs.build-${tenantId}.result }}" >> $GITHUB_STEP_SUMMARY`).join('\n')}
 `;
 
-    fs.writeFileSync('./TENANTS.md', markdown);
-    console.log('✅ Generated tenant documentation (TENANTS.md)');
+  const workflowsDir = '.github/workflows';
+  const orchestratorPath = path.join(workflowsDir, 'build-all-tenants.yml');
+  fs.writeFileSync(orchestratorPath, orchestratorContent);
+  console.log('✅ Generated orchestrator workflow: build-all-tenants.yml');
+};
 
-  } catch (error) {
-    console.warn('⚠️  Could not generate tenant documentation:', (error as Error).message);
-  }
+const generateAppConfigContent = (tenantId: string, appConfig: any): string => {
+  return `// Auto-generated app.config.ts for tenant: ${tenantId}
+// Generated at: ${new Date().toISOString()}
+import { ExpoConfig } from 'expo/config';
+
+const config: { expo: ExpoConfig } = ${JSON.stringify(appConfig, null, 2)};
+
+export default config;
+`;
 };
 
 main();

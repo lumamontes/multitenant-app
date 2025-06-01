@@ -84,6 +84,47 @@
         "buildType": "apk",
         "gradleCommand": ":app:assembleDebug"
       }
+    },
+    "tenant3-production": {
+      "env": {
+        "TENANT": "tenant3",
+        "APP_VERSION": "1.0.0"
+      },
+      "ios": {
+        "bundleIdentifier": "com.example.tenant3",
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "package": "com.example.tenant3",
+        "buildType": "apk"
+      }
+    },
+    "tenant3-preview": {
+      "extends": "tenant3-production",
+      "distribution": "internal",
+      "ios": {
+        "bundleIdentifier": "com.example.tenant3",
+        "buildConfiguration": "Debug"
+      },
+      "android": {
+        "package": "com.example.tenant3",
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
+    },
+    "tenant3-development": {
+      "extends": "tenant3-production",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "bundleIdentifier": "com.example.tenant3.dev",
+        "buildConfiguration": "Debug"
+      },
+      "android": {
+        "package": "com.example.tenant3.dev",
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug"
+      }
     }
   },
   "submit": {
@@ -120,6 +161,24 @@
       },
       "android": {
         "package": "com.yourcompany.tenantTwo",
+        "track": "internal"
+      }
+    },
+    "tenant3-production": {
+      "ios": {
+        "bundleIdentifier": "com.example.tenant3"
+      },
+      "android": {
+        "package": "com.example.tenant3",
+        "track": "production"
+      }
+    },
+    "tenant3-internal": {
+      "ios": {
+        "bundleIdentifier": "com.example.tenant3"
+      },
+      "android": {
+        "package": "com.example.tenant3",
         "track": "internal"
       }
     }

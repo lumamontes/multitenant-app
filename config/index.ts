@@ -4,7 +4,7 @@
 export const availableTenants = [
   "tenant1",
   "tenant2",
-  "tenantDev"
+  "tenant3"
 ];
 
 // Helper function to load all tenant configs
@@ -13,7 +13,7 @@ export const loadAllTenants = () => {
   
   tenants['tenant1'] = require('./tenants/tenant1.json');
   tenants['tenant2'] = require('./tenants/tenant2.json');
-  tenants['tenantDev'] = require('./tenants/tenantDev.json');
+  tenants['tenant3'] = require('./tenants/tenant3.json');
   
   return tenants;
 };

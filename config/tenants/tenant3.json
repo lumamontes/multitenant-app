@@ -1,0 +1,29 @@
+{
+  "name": "Tenant 3",
+  "slug": "tenant3-app",
+  "bundleIdentifier": "com.example.tenant3",
+  "package": "com.example.tenant3",
+  "theme": {
+    "primaryColor": "#000000",
+    "backgroundColor": "#FFFFFF",
+    "secondaryColor": "#00000066",
+    "textColor": "#000000"
+  },
+  "api": {
+    "baseUrl": ""
+  },
+  "features": [
+    "basic"
+  ],
+  "assets": {
+    "icon": "./assets/tenant3/icon.png",
+    "splash": "./assets/tenant3/splash.png",
+    "logo": "./assets/tenant3/logo.png"
+  },
+  "branding": {
+    "appName": "Tenant 3",
+    "companyName": "",
+    "supportEmail": "support@tenant3.com",
+    "website": "https://tenant3.com"
+  }
+}
